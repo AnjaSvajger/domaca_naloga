@@ -1,8 +1,7 @@
 streamlit
 pandas
-transformers
-torch
 wordcloud
 matplotlib
 altair
+
 
