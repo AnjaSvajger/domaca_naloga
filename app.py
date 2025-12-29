@@ -3,21 +3,19 @@ import json
 import pandas as pd
 import os
 import altair as alt
-from transformers import pipeline
 from wordcloud import WordCloud
 import matplotlib.pyplot as plt
 
 # --- 1. KONFIGURACIJA STRANI ---
 st.set_page_config(
-    page_title="eCommerce Sentiment Dashboard",
-    page_icon="🛍️",
+    page_title="Analiza Trga 2023", # Malo spremenjen naslov
+    page_icon="📈",
     layout="wide"
 )
 
 # --- 2. FUNKCIJE ZA NALAGANJE ---
 @st.cache_data
 def load_data():
-    """Naloži JSON datoteko, ki jo je ustvaril scraper."""
     file_path = 'scraped_data.json'
     if not os.path.exists(file_path):
         return None
@@ -25,220 +23,150 @@ def load_data():
         data = json.load(f)
     return data
 
-@st.cache_resource
-def load_sentiment_model():
-    """Naloži Hugging Face model samo enkrat (cache)."""
-    # Uporabljamo privzet model za sentiment analysis
-    return pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
+# --- 3. SIDEBAR (Samo navigacija, brez filtrov!) ---
+st.sidebar.header("Meni")
+view_option = st.sidebar.radio("Pojdi na:", ["Products", "Testimonials", "Reviews"])
+st.sidebar.markdown("---")
+st.sidebar.caption("Podatki pridobljeni za leto 2023.")
 
-# Naložimo podatke
 data = load_data()
-
-# Če datoteke ni, opozori uporabnika
 if not data:
-    st.error("⚠️ Datoteka 'scraped_data.json' ne obstaja! Prepričaj se, da si najprej pognala 'scraper.py'.")
+    st.error("Ni podatkov! Preveri scraped_data.json.")
     st.stop()
 
-# --- 3. STRANSKI MENI (NAVIGACIJA) ---
-st.sidebar.title("🔍 Navigacija")
-view_option = st.sidebar.radio(
-    "Izberi pogled:",
-    ["Products", "Testimonials", "Reviews"]
-)
-st.sidebar.markdown("---")
-
-# Dodaten filter samo za Testimonials
-selected_rating_filter = "All"
-if view_option == "Testimonials":
-    st.sidebar.subheader("Filter po ocenah")
-    selected_rating_filter = st.sidebar.radio(
-        "Prikaži:",
-        ["All", "5 Stars", "4 Stars", "3 Stars", "2 Stars", "1 Star"]
-    )
-
-st.sidebar.info("Dashboard za analizo mnenj.\nPodatki: leto 2023.")
-
 # --- 4. GLAVNA VSEBINA ---
-st.title(f"📊 {view_option} Dashboard")
+st.title(f"📌 {view_option}")
 
 # ==========================================
 # A) PRODUCTS VIEW
 # ==========================================
 if view_option == "Products":
-    st.markdown("Seznam vseh postrganih produktov in njihovih cen.")
-    products_list = data.get("products", [])
-    
-    if products_list:
-        df_products = pd.DataFrame(products_list)
-        
-        # Prikaz metrike
-        st.metric("Število produktov", len(df_products))
-        
-        # Prikaz tabele
-        st.dataframe(
-            df_products, 
-            use_container_width=True, 
-            hide_index=True,
-            column_config={
-                "price": st.column_config.TextColumn("Cena", width="small"),
-                "title": st.column_config.TextColumn("Ime Produkta")
-            }
-        )
+    st.markdown("### Katalog izdelkov")
+    df = pd.DataFrame(data.get("products", []))
+    if not df.empty:
+        # Prikaz v dveh stolpcih za lepši izgled
+        col1, col2 = st.columns([1, 3])
+        col1.metric("Skupaj izdelkov", len(df))
+        col2.dataframe(df, use_container_width=True, hide_index=True)
     else:
-        st.warning("Ni podatkov o produktih.")
+        st.warning("Ni produktov.")
 
 # ==========================================
 # B) TESTIMONIALS VIEW
 # ==========================================
 elif view_option == "Testimonials":
-    st.markdown("Mnenja strank (Testimonials) s filtriranjem po zvezdicah.")
-    testimonials_list = data.get("testimonials", [])
-    
-    if testimonials_list:
-        df_testi = pd.DataFrame(testimonials_list)
+    st.markdown("### Kaj pravijo stranke?")
+    df = pd.DataFrame(data.get("testimonials", []))
+    if not df.empty:
+        # Izračunamo povprečje zvezdic, če obstajajo
+        avg_rating = df["rating"].mean()
         
-        # Logika za filtriranje
-        if "rating" in df_testi.columns:
-            if selected_rating_filter != "All":
-                star_num = int(selected_rating_filter.split()[0]) # "5 Stars" -> 5
-                filtered_df = df_testi[df_testi['rating'] == star_num]
-            else:
-                filtered_df = df_testi
-            
-            st.metric("Prikazana mnenja", len(filtered_df))
-            
-            if not filtered_df.empty:
-                # Dodamo vizualne zvezdice za tabelo
-                filtered_df["rating_display"] = filtered_df["rating"].apply(lambda x: "⭐" * int(x))
-                
-                st.dataframe(
-                    filtered_df[["rating_display", "text"]],
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "rating_display": st.column_config.TextColumn("Ocena", width="small"),
-                        "text": "Besedilo mnenja"
-                    }
-                )
-            else:
-                st.info(f"Ni mnenj z oceno {selected_rating_filter}.")
-        else:
-            st.dataframe(df_testi, use_container_width=True)
+        c1, c2 = st.columns(2)
+        c1.metric("Število mnenj", len(df))
+        c2.metric("Povprečna ocena", f"{avg_rating:.1f} / 5.0")
+        
+        st.divider()
+        
+        # Lepši prikaz z zvezdicami
+        df["Ocena"] = df["rating"].apply(lambda x: "⭐" * int(x) if str(x).isdigit() else "⭐")
+        st.dataframe(df[["Ocena", "text"]], use_container_width=True, hide_index=True)
     else:
-        st.warning("Ni podatkov o testimonials.")
+        st.warning("Ni testimonials.")
 
 # ==========================================
-# C) REVIEWS VIEW (GLAVNI DEL Z AI)
+# C) REVIEWS VIEW (PRENOVLJEN DIZAJN)
 # ==========================================
 elif view_option == "Reviews":
-    st.markdown("Analiza mnenj (Reviews) za leto 2023 s pomočjo umetne inteligence.")
+    st.markdown("### Analiza mnenj in sentimenta")
+    df = pd.DataFrame(data.get("reviews", []))
     
-    reviews_list = data.get("reviews", [])
-    
-    if reviews_list:
-        df_reviews = pd.DataFrame(reviews_list)
+    if not df.empty:
+        # Priprava datuma
+        df['date_obj'] = pd.to_datetime(df['date'], errors='coerce')
+        df = df.dropna(subset=['date_obj'])
         
-        # Pretvorba datuma
-        df_reviews['date_obj'] = pd.to_datetime(df_reviews['date'], errors='coerce')
-        # Odstranimo vrstice, kjer datum ni bil prepoznan
-        df_reviews = df_reviews.dropna(subset=['date_obj'])
+        # --- NOVI FILTRI (Zgoraj v stolpcih, ne v sidebarju) ---
+        st.write("🛠️ **Filtri podatkov:**")
         
-        # --- IZBIRA MESECA (SLIDER) ---
-        months = ["January", "February", "March", "April", "May", "June", 
-                  "July", "August", "September", "October", "November", "December"]
+        filter_col1, filter_col2 = st.columns(2)
         
-        # Slider vrne ime meseca (npr. "May")
-        selected_month_name = st.select_slider("Izberi mesec (leto 2023):", options=months, value="May")
-        
-        # Pretvorimo ime v številko (May -> 5)
-        month_map = {m: i+1 for i, m in enumerate(months)}
-        selected_month_num = month_map[selected_month_name]
-        
-        # Filtriranje DataFrame-a
-        filtered_df = df_reviews[
-            (df_reviews['date_obj'].dt.month == selected_month_num) & 
-            (df_reviews['date_obj'].dt.year == 2023)
+        with filter_col1:
+            # 1. Izbira meseca (Dropdown namesto Sliderja)
+            months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+            selected_month = st.selectbox("📅 Izberi mesec:", months, index=4) # Privzeto May
+            month_idx = months.index(selected_month) + 1
+            
+        with filter_col2:
+            # 2. Nov filter za ocene (Multiselect) - To te loči od sošolcev
+            # Uporabnik lahko izbere npr. samo "5" in "1"
+            available_ratings = sorted(df['rating'].unique())
+            selected_ratings = st.multiselect("⭐ Prikaži ocene:", available_ratings, default=available_ratings)
+
+        # --- LOGIKA FILTRIRANJA ---
+        filtered_df = df[
+            (df['date_obj'].dt.month == month_idx) & 
+            (df['date_obj'].dt.year == 2023) &
+            (df['rating'].isin(selected_ratings)) # Dodaten filter
         ].copy()
         
-        # Prikaz metrik
-        col1, col2 = st.columns(2)
-        col1.metric("Izbran mesec", f"{selected_month_name} 2023")
-        col2.metric("Najdenih mnenj", len(filtered_df))
-        
+        st.divider()
+
+        # --- PRIKAZ REZULTATOV ---
         if not filtered_df.empty:
             
-            # --- 1. WORD CLOUD (BONUS) ---
-            st.divider()
-            st.subheader("☁️ Word Cloud (Najpogostejše besede)")
-            try:
-                all_text = " ".join(filtered_df['text'].astype(str).tolist())
-                if len(all_text) > 0:
-                    wordcloud = WordCloud(width=800, height=300, background_color='white').generate(all_text)
-                    fig, ax = plt.subplots(figsize=(10, 4))
-                    ax.imshow(wordcloud, interpolation='bilinear')
-                    ax.axis("off")
-                    st.pyplot(fig)
-                else:
-                    st.info("Premalo besedila za Word Cloud.")
-            except Exception as e:
-                st.warning(f"Word Cloud napaka: {e}")
-
-            st.divider()
-
-            # --- 2. AI SENTIMENT ANALYSIS ---
-            st.subheader("🤖 AI Analiza Sentiment-a")
-            st.caption("Uporabljen model: distilbert-base-uncased-finetuned-sst-2-english")
+            # KPI Metrike
+            kpi1, kpi2, kpi3 = st.columns(3)
+            kpi1.metric("Prikazanih mnenj", len(filtered_df))
+            avg_r = filtered_df['rating'].mean()
+            kpi2.metric("Povpr. ocena meseca", f"{avg_r:.2f}")
             
-            with st.spinner('AI analizira mnenja... Prosim počakaj.'):
-                try:
-                    sentiment_pipeline = load_sentiment_model()
-                    
-                    # Hugging Face analiza
-                    texts = filtered_df['text'].astype(str).tolist()
-                    # Omejimo dolžino teksta, ker imajo modeli limit (512 tokenov)
-                    texts = [t[:512] for t in texts] 
-                    
-                    results = sentiment_pipeline(texts)
-                    
-                    # Dodamo rezultate v tabelo
-                    filtered_df['sentiment_label'] = [r['label'] for r in results]
-                    filtered_df['sentiment_score'] = [r['score'] for r in results]
-                    
-                    # --- 3. GRAF (ALTAIR) ---
-                    st.markdown("#### Porazdelitev (Pozitivno vs. Negativno)")
-                    
-                    chart_data = filtered_df.groupby('sentiment_label').agg(
-                        count=('sentiment_label', 'count'),
-                        avg_conf=('sentiment_score', 'mean')
-                    ).reset_index()
-                    
-                    # Barva glede na sentiment
-                    chart = alt.Chart(chart_data).mark_bar().encode(
-                        x=alt.X('sentiment_label', axis=alt.Axis(title="Sentiment")),
-                        y=alt.Y('count', axis=alt.Axis(title="Število mnenj")),
-                        color=alt.Color('sentiment_label', scale=alt.Scale(domain=['POSITIVE', 'NEGATIVE'], range=['#28a745', '#dc3545'])),
-                        tooltip=['sentiment_label', 'count', alt.Tooltip('avg_conf', format='.2%')]
-                    ).properties(height=300)
-                    
-                    st.altair_chart(chart, use_container_width=True)
-                    
-                    # --- 4. PODROBNA TABELA ---
-                    st.markdown("#### Podrobni podatki")
-                    
-                    # Lepši izpis za tabelo
-                    filtered_df['AI Sentiment'] = filtered_df['sentiment_label'].apply(lambda x: "🟢 Pozitivno" if x == "POSITIVE" else "🔴 Negativno")
-                    filtered_df['Confidence'] = filtered_df['sentiment_score'].apply(lambda x: f"{x:.1%}")
-                    
-                    st.dataframe(
-                        filtered_df[["date", "AI Sentiment", "Confidence", "text"]],
-                        use_container_width=True,
-                        hide_index=True
-                    )
-                    
-                except Exception as e:
-                    st.error(f"Napaka pri AI analizi: {e}")
-                    
+            # Simuliran sentiment (Za Render Free Tier)
+            # > 3 je pozitivno, <= 3 je negativno
+            positive_count = len(filtered_df[filtered_df['rating'] > 3])
+            kpi3.metric("Pozitivnih mnenj", f"{positive_count}")
+
+            # 1. WORD CLOUD (Oblak besed)
+            st.subheader(f"☁️ Najpogostejše besede v mesecu {selected_month}")
+            try:
+                text_data = " ".join(filtered_df['text'].astype(str).tolist())
+                # Spremenimo barvo ozadja na črno za drug stil
+                wc = WordCloud(width=800, height=350, background_color='black', colormap='Pastel1').generate(text_data)
+                
+                fig, ax = plt.subplots(figsize=(10, 5))
+                ax.imshow(wc, interpolation='bilinear')
+                ax.axis("off")
+                st.pyplot(fig)
+            except: st.info("Premalo besedila za generiranje oblaka besed.")
+            
+            # 2. SENTIMENT GRAF (Altair)
+            st.subheader("📊 Sentiment Analiza")
+            
+            # Priprava podatkov za graf
+            filtered_df['Sentiment'] = filtered_df['rating'].apply(lambda x: 'POZITIVNO 😊' if int(x) > 3 else 'NEGATIVNO 😠')
+            
+            # Grafikon (Donut chart namesto Bar chart - da bo drugače!)
+            chart_base = alt.Chart(filtered_df).encode(theta=alt.Theta("count()", stack=True))
+            
+            pie = chart_base.mark_arc(outerRadius=120).encode(
+                color=alt.Color("Sentiment", scale=alt.Scale(domain=['POZITIVNO 😊', 'NEGATIVNO 😠'], range=['#66c2a5', '#fc8d62'])),
+                order=alt.Order("Sentiment", sort="descending"),
+                tooltip=["Sentiment", "count()"]
+            )
+            text = chart_base.mark_text(radius=140).encode(
+                text="count()",
+                order=alt.Order("Sentiment", sort="descending"),
+                color=alt.value("black")  
+            )
+            
+            st.altair_chart(pie + text, use_container_width=True)
+            
+            # 3. TABELA PODATKOV
+            with st.expander("Poglej podrobne podatke (Tabela)"):
+                st.dataframe(
+                    filtered_df[['date', 'rating', 'Sentiment', 'text']], 
+                    use_container_width=True,
+                    hide_index=True
+                )
+            
         else:
-            st.info(f"V mesecu {selected_month_name} 2023 ni bilo najdenih mnenj. Poskusi premakniti drsnik (npr. na September ali May).")
-    else:
-        st.warning("Ni naloženih mnenj (Reviews).")
+            st.warning(f"Za mesec {selected_month} in izbrane ocene ni najdenih mnenj.")
